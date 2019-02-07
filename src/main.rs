@@ -1,11 +1,12 @@
 use std::{error::Error,
           fmt::{Display, Formatter},
           fs::{create_dir_all, File, OpenOptions},
-          io::BufReader,
+          io::{BufReader, Read},
           path::{Path, PathBuf},
           sync::Arc};
 
 use regex::RegexBuilder;
+use reqwest::header::USER_AGENT;
 use rustyline::{config::Configurer, error::ReadlineError, At, Cmd, Editor, KeyPress, Movement};
 use serde::{Deserialize, Serialize};
 
@@ -216,10 +217,20 @@ struct Update;
 impl Command for Update {
     fn invoke(&self, line: Vec<String>, _dict: &[ModInfo], _editor: &mut Editor<()>) -> Result<Status, Box<Error>> {
         if !line.is_empty() && &line[0] == "update" {
-            download(
-                "https://staging_cursemeta.dries007.net/api/v3/direct/addon/search?gameId=432",
-                &PathBuf::from("./mods.json.update"),
-            )?;
+            let mut pem = Vec::new();
+            File::open("root.pem")?.read_to_end(&mut pem)?;
+            let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()?;
+            client
+                .get("https://staging_cursemeta.dries007.net/api/v3/direct/addon/search?gameId=432")
+                .header(USER_AGENT, "liushiqi17@mails.ucas.ac.cn")
+                .send()?
+                .copy_to(
+                    &mut OpenOptions::new()
+                        .write(true)
+                        .create(true)
+                        .append(false)
+                        .open(&PathBuf::from("./mods.json.update"))?,
+                )?;
             Ok(Status::CONTINUE)
         } else {
             Err(Box::from(CommandNotFound::new(&line.join(" "))))
