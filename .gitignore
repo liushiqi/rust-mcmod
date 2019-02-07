@@ -1,0 +1,6 @@
+/mods
+.vscode
+.idea
+/history.line
+/target
+**/*.rs.bk
