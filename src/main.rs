@@ -1,7 +1,9 @@
+#![recursion_limit = "256"]
+
 use std::{error::Error,
           fmt::{Display, Formatter},
           fs::{create_dir_all, File, OpenOptions},
-          io::{BufReader, Read},
+          io::BufReader,
           path::{Path, PathBuf},
           sync::Arc};
 
@@ -12,7 +14,8 @@ use serde::{Deserialize, Serialize};
 
 fn main() -> Result<(), Box<Error>> {
     let mut reader = Editor::<()>::new();
-    let mut dict: Vec<ModInfo> = serde_json::from_reader(BufReader::new(File::open("./mods.json")?))?;
+    let mut dict: Vec<ModInfo> = serde_yaml::from_reader(BufReader::new(File::open("./mods.yaml")?))?;
+    dict.sort_by_key(|mod_info| mod_info.id);
     if reader.load_history("history.line").is_err() {
         println!("No previous history.");
     }
@@ -32,19 +35,25 @@ fn main() -> Result<(), Box<Error>> {
         match line {
             Ok(line) => {
                 if !line.is_empty() {
-                    let status =
-                        invoker.invoke(line.split_whitespace().map(|s| s.to_string()).collect(), &dict, &mut reader)?;
+                    let status = invoker.invoke(
+                        line.split_whitespace().map(|s| s.to_string()).collect(),
+                        &mut dict,
+                        &mut reader,
+                    )?;
                     if status == Status::QUIT {
                         reader.save_history("history.line").unwrap();
+                        serde_yaml::to_writer(OpenOptions::new().write(true).create(true).open("./mods.yaml")?, &dict)?;
                         break Ok(());
                     } else if status == Status::REFRESH {
-                        dict = serde_json::from_reader(BufReader::new(File::open("./mods.json.update")?))?;
+                        // dict = Arc::from(&mut serde_json::from_reader(File::open("./mods.json")?)?);
+                        dict.sort_by_key(|mod_info| mod_info.id);
                     }
                     continue;
                 }
             },
             Err(ReadlineError::Interrupted) => continue,
             Err(ReadlineError::Eof) => {
+                serde_yaml::to_writer(OpenOptions::new().write(true).create(true).open("./mods.yaml")?, &dict)?;
                 reader.save_history("history.line").unwrap();
                 break Ok(());
             },
@@ -129,7 +138,9 @@ impl Commands {
 }
 
 impl Command for Commands {
-    fn invoke(&self, line: Vec<String>, dict: &[ModInfo], editor: &mut Editor<()>) -> Result<Status, Box<Error>> {
+    fn invoke(
+        &self, line: Vec<String>, dict: &mut Vec<ModInfo>, editor: &mut Editor<()>,
+    ) -> Result<Status, Box<Error>> {
         for command in self.commands.clone() {
             let result = command.invoke(line.clone(), dict, editor);
             match result {
@@ -149,13 +160,16 @@ impl Command for Commands {
 }
 
 trait Command {
-    fn invoke(&self, line: Vec<String>, dict: &[ModInfo], editor: &mut Editor<()>) -> Result<Status, Box<Error>>;
+    fn invoke(&self, line: Vec<String>, dict: &mut Vec<ModInfo>, editor: &mut Editor<()>)
+        -> Result<Status, Box<Error>>;
 }
 
 struct Search;
 
 impl Command for Search {
-    fn invoke(&self, line: Vec<String>, dict: &[ModInfo], _editor: &mut Editor<()>) -> Result<Status, Box<Error>> {
+    fn invoke(
+        &self, line: Vec<String>, dict: &mut Vec<ModInfo>, _editor: &mut Editor<()>,
+    ) -> Result<Status, Box<Error>> {
         if line.len() > 1 && &line[0] == "search" {
             let searched = RegexBuilder::new(&line[1..].join(" ")).case_insensitive(true).build()?;
             let mut i = 0;
@@ -171,7 +185,27 @@ impl Command for Search {
                 i += 1;
             }
             if i == 0 {
-                println!("No mod found.");
+                let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()?;
+                let mod_info: Vec<ModInfo> = client
+                    .get(&format!(
+                        "https://staging_cursemeta.dries007.net/api/v3/direct/addon/search?gameId=432&searchFilter={}",
+                        line[1..].join("%20")
+                    ))
+                    .header(USER_AGENT, "liushiqi17@mails.ucas.ac.cn")
+                    .send()?
+                    .json()?;
+                if !mod_info.is_empty() {
+                    for mod_info in mod_info {
+                        println!(
+                            "Mod found, id is: {}, name is {}, main page is: {}",
+                            mod_info.id, mod_info.name, mod_info.website_url
+                        );
+                        dict.push(mod_info);
+                    }
+                    dict.sort_by_key(|mod_info| mod_info.id);
+                } else {
+                    println!("No mod found.");
+                }
             }
             Ok(Status::CONTINUE)
         } else {
@@ -183,7 +217,9 @@ impl Command for Search {
 struct Download;
 
 impl Command for Download {
-    fn invoke(&self, line: Vec<String>, dict: &[ModInfo], editor: &mut Editor<()>) -> Result<Status, Box<Error>> {
+    fn invoke(
+        &self, line: Vec<String>, dict: &mut Vec<ModInfo>, editor: &mut Editor<()>,
+    ) -> Result<Status, Box<Error>> {
         if line.len() > 1 && &line[0] == "download" {
             editor.set_auto_add_history(false);
             let version = loop {
@@ -215,13 +251,13 @@ impl Command for Download {
 struct Update;
 
 impl Command for Update {
-    fn invoke(&self, line: Vec<String>, _dict: &[ModInfo], _editor: &mut Editor<()>) -> Result<Status, Box<Error>> {
+    fn invoke(
+        &self, line: Vec<String>, _dict: &mut Vec<ModInfo>, _editor: &mut Editor<()>,
+    ) -> Result<Status, Box<Error>> {
         if !line.is_empty() && &line[0] == "update" {
-            let mut pem = Vec::new();
-            File::open("root.pem")?.read_to_end(&mut pem)?;
             let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()?;
             client
-                .get("https://staging_cursemeta.dries007.net/api/v3/direct/addon/search?gameId=432")
+                .get("https://staging_cursemeta.dries007.net/api/v3/direct/addon/search?gameId=432&sectionId=6")
                 .header(USER_AGENT, "liushiqi17@mails.ucas.ac.cn")
                 .send()?
                 .copy_to(
@@ -229,9 +265,9 @@ impl Command for Update {
                         .write(true)
                         .create(true)
                         .append(false)
-                        .open(&PathBuf::from("./mods.json.update"))?,
+                        .open(&PathBuf::from("./mods.json"))?,
                 )?;
-            Ok(Status::CONTINUE)
+            Ok(Status::REFRESH)
         } else {
             Err(Box::from(CommandNotFound::new(&line.join(" "))))
         }
@@ -241,10 +277,13 @@ impl Command for Update {
 struct Save;
 
 impl Command for Save {
-    fn invoke(&self, line: Vec<String>, _dict: &[ModInfo], editor: &mut Editor<()>) -> Result<Status, Box<Error>> {
+    fn invoke(
+        &self, line: Vec<String>, dict: &mut Vec<ModInfo>, editor: &mut Editor<()>,
+    ) -> Result<Status, Box<Error>> {
         if !line.is_empty() && &line[0] == "save" {
+            serde_yaml::to_writer(OpenOptions::new().write(true).create(true).open("./mods.yaml")?, &dict)?;
             editor.save_history("history.line").unwrap();
-            Ok(Status::REFRESH)
+            Ok(Status::CONTINUE)
         } else {
             Err(Box::from(CommandNotFound::new(&line.join(" "))))
         }
@@ -254,8 +293,11 @@ impl Command for Save {
 struct Quit;
 
 impl Command for Quit {
-    fn invoke(&self, line: Vec<String>, _dict: &[ModInfo], editor: &mut Editor<()>) -> Result<Status, Box<Error>> {
+    fn invoke(
+        &self, line: Vec<String>, dict: &mut Vec<ModInfo>, editor: &mut Editor<()>,
+    ) -> Result<Status, Box<Error>> {
         if !line.is_empty() && (&line[0] == "quit" || &line[0] == "exit") {
+            serde_yaml::to_writer(OpenOptions::new().write(true).create(true).open("./mods.yaml")?, &dict)?;
             editor.save_history("history.line").unwrap();
             Ok(Status::QUIT)
         } else {
@@ -264,23 +306,37 @@ impl Command for Quit {
     }
 }
 
-fn download_mod_to_dir(dir: &PathBuf, id: u32, dict: &[ModInfo], version: &str) -> Result<(), Box<Error>> {
-    if let Some(mod_info) = dict.iter().find(|mod_info| mod_info.id == id) {
-        create_dir_all(dir)?;
-        let file_info = mod_info
-            .latest_files
-            .iter()
-            .find(|file_info| file_info.game_version.iter().any(|ver| ver.find(version).is_some()));
-        if let Some(file_info) = file_info {
-            download(&file_info.download_url, &dir.join(file_info.file_name_on_disk.clone()))?;
-            for dep in file_info.dependencies.iter() {
-                download_mod_to_dir(dir, dep.addon_id, dict, version)?;
+fn download_mod_to_dir(dir: &PathBuf, id: u32, dict: &mut Vec<ModInfo>, version: &str) -> Result<(), Box<Error>> {
+    let mut stack = vec![id];
+    loop {
+        if let Some(id) = stack.pop() {
+            if let Some(mod_info) = dict.iter().find(|mod_info| mod_info.id == id) {
+                create_dir_all(dir)?;
+                let file_info = mod_info
+                    .latest_files
+                    .iter()
+                    .find(|file_info| file_info.game_version.iter().any(|ver| ver.find(version).is_some()));
+                if let Some(file_info) = file_info {
+                    download(&file_info.download_url, &dir.join(file_info.file_name_on_disk.clone()))?;
+                    for dep in file_info.dependencies.iter() {
+                        stack.push(dep.addon_id);
+                        continue;
+                    }
+                } else {
+                    let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()?;
+                    let mod_info: ModInfo = client
+                        .get(&format!("https://staging_cursemeta.dries007.net/api/v3/direct/addon/{}", id))
+                        .header(USER_AGENT, "liushiqi17@mails.ucas.ac.cn")
+                        .send()?
+                        .json()?;
+                    stack.push(mod_info.id);
+                    dict.push(mod_info);
+                }
             }
         } else {
-            println!("No valid mod of version {}", version);
+            break Ok(());
         }
     }
-    Ok(())
 }
 
 fn download(url: &str, write_to: &PathBuf) -> Result<(), Box<Error>> {
