@@ -8,7 +8,7 @@ use std::{error::Error,
           sync::Arc};
 
 use reqwest::header::USER_AGENT;
-use rustyline::{At, Cmd, config::Configurer, Editor, error::ReadlineError, KeyPress, Movement};
+use rustyline::{config::Configurer, error::ReadlineError, At, Cmd, Editor, KeyPress, Movement};
 use serde::{Deserialize, Serialize};
 
 fn main() -> Result<(), Box<Error>> {
@@ -46,17 +46,17 @@ fn main() -> Result<(), Box<Error>> {
                     }
                     continue;
                 }
-            }
+            },
             Err(ReadlineError::Interrupted) => continue,
             Err(ReadlineError::Eof) => {
                 save(&mut dict)?;
                 reader.save_history("history.line").unwrap();
                 break Ok(());
-            }
+            },
             Err(err) => {
                 println!("Error found: {:?}", err);
                 Err(err)?
-            }
+            },
         }
     }
 }
@@ -146,7 +146,7 @@ impl Command for Commands {
                     } else {
                         Err(err)?;
                     }
-                }
+                },
             };
         }
         println!("Invalid Command: {}", line.join(" "));
@@ -156,7 +156,7 @@ impl Command for Commands {
 
 trait Command {
     fn invoke(&self, line: Vec<String>, dict: &mut Vec<ModInfo>, editor: &mut Editor<()>)
-              -> Result<Status, Box<Error>>;
+        -> Result<Status, Box<Error>>;
 }
 
 struct Search;
@@ -215,9 +215,25 @@ impl Command for Download {
             for id in &line[1..] {
                 if let Ok(id) = id.parse::<u32>() {
                     if let Some(mod_info) = dict.iter().find(|mod_info| mod_info.id == id) {
-                        let dir = format!("./mods/{}", mod_info.name);
+                        let dir = format!("./mods/{}/{}", version, mod_info.name);
                         let path = Path::new(&dir).to_path_buf();
                         download_mod_to_dir(&path, id, dict, &version)?;
+                    } else {
+                        let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()?;
+                        if let Ok(mod_info) = client
+                            .get(&format!("https://staging_cursemeta.dries007.net/api/v3/direct/addon/{}", id))
+                            .header(USER_AGENT, "liushiqi17@mails.ucas.ac.cn")
+                            .send()?
+                            .json::<ModInfo>()
+                        {
+                            let dir = format!("./mods/{}/{}", version, mod_info.name);
+                            let path = Path::new(&dir).to_path_buf();
+                            dict.push(mod_info);
+                            dict.sort_by_key(|mod_info| mod_info.id);
+                            download_mod_to_dir(&path, id, dict, &version)?;
+                        } else {
+                            println!("Mod with id {} not found.", id);
+                        }
                     }
                 } else {
                     println!("not valid input: {}", id);
@@ -297,18 +313,23 @@ fn download_mod_to_dir(dir: &PathBuf, id: u32, dict: &mut Vec<ModInfo>, version:
                     .find(|file_info| file_info.game_version.iter().any(|ver| ver.find(version).is_some()));
                 if let Some(file_info) = file_info {
                     download(&file_info.download_url, &dir.join(file_info.file_name_on_disk.clone()))?;
+                    println!("Download {} from {} succeed!", file_info.file_name_on_disk, file_info.download_url);
                     for dep in file_info.dependencies.iter() {
                         stack.push(dep.addon_id);
                         continue;
                     }
                 } else {
-                    let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()?;
-                    let mod_info: ModInfo = client
-                        .get(&format!("https://staging_cursemeta.dries007.net/api/v3/direct/addon/{}", id))
-                        .header(USER_AGENT, "liushiqi17@mails.ucas.ac.cn")
-                        .send()?
-                        .json()?;
-                    stack.push(mod_info.id);
+                    println!("No mod {} for Minecraft version {}.", mod_info.name, version);
+                }
+            } else {
+                let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()?;
+                let mod_info: ModInfo = client
+                    .get(&format!("https://staging_cursemeta.dries007.net/api/v3/direct/addon/{}", id))
+                    .header(USER_AGENT, "liushiqi17@mails.ucas.ac.cn")
+                    .send()?
+                    .json()?;
+                stack.push(mod_info.id);
+                if dict.iter().find(|info| mod_info.id == info.id).is_none() {
                     dict.push(mod_info);
                 }
             }
