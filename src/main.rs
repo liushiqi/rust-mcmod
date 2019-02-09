@@ -47,8 +47,8 @@ fn run(reader: &mut Editor<()>, dict: &mut Vec<ModInfo>) -> Result<(), Box<Error
                 if !line.is_empty() {
                     let status =
                         invoker.invoke(line.split_whitespace().map(|s| s.to_string()).collect(), dict, reader)?;
+                    reader.save_history("history.line").unwrap();
                     if status == Status::QUIT {
-                        reader.save_history("history.line")?;
                         save(dict)?;
                         break Ok(());
                     }
@@ -186,7 +186,7 @@ impl Command for Search {
             let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()?;
             let mod_info: Vec<ModInfo> = client
                 .get(&format!(
-                    "https://staging_cursemeta.dries007.net/api/v3/direct/addon/search?gameId=432&searchFilter={}",
+                    "https://staging_cursemeta.dries007.net/api/v3/direct/addon/search?gameId=432&sectionId=6&searchFilter={}",
                     line[1..].join("%20")
                 ))
                 .header(USER_AGENT, "liushiqi17@mails.ucas.ac.cn")
@@ -384,7 +384,7 @@ fn download_mod_to_dir(dir: &PathBuf, id: u32, dict: &mut Vec<ModInfo>, version:
                         );
                         downloaded.push(id);
                         for dep in file_info.dependencies.iter() {
-                            if dep.r#type == 1 {
+                            if dep.r#type == 1 || dep.r#type == 3 {
                                 stack.push(dep.addon_id);
                             }
                         }
@@ -411,6 +411,14 @@ fn download_mod_to_dir(dir: &PathBuf, id: u32, dict: &mut Vec<ModInfo>, version:
 }
 
 fn download(url: &str, write_to: &PathBuf) -> Result<(), Box<Error>> {
-    reqwest::get(url)?.copy_to(&mut OpenOptions::new().write(true).create(true).append(false).open(write_to)?)?;
+    let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()?;
+    client
+        .get(url)
+        .header(
+            USER_AGENT,
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.81 Safari/537.36",
+        )
+        .send()?
+        .copy_to(&mut OpenOptions::new().write(true).create(true).append(false).open(write_to)?)?;
     Ok(())
 }

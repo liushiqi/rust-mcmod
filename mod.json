@@ -1,0 +1,42 @@
+{
+    "id": 2583111,
+    "fileName": "RTM2.4.5-24_forge-1.12.2-14.23.2.2611",
+    "fileNameOnDisk": "RTM2.4.5-24_forge-1.12.2-14.23.2.2611.jar",
+    "fileDate": "2018-07-15T06:02:08.657",
+    "fileLength": 13450023,
+    "releaseType": 3,
+    "fileStatus": 2,
+    "downloadUrl": "https://files.forgecdn.net/files/2583/111/RTM2.4.5-24_forge-1.12.2-14.23.2.2611.jar",
+    "isAlternate": false,
+    "alternateFileId": 0,
+    "dependencies": [{
+        "addonId": 288989,
+        "type": 3
+    }],
+    "isAvailable": true,
+    "modules": [{
+        "folderName": "assets",
+        "fimgerprint": 157405732
+    }, {
+        "folderName": "jp",
+        "fimgerprint": 3409618587
+    }, {
+        "folderName": "LICENSE.txt",
+        "fimgerprint": 1457663845
+    }, {
+        "folderName": "logo.png",
+        "fimgerprint": 322775055
+    }, {
+        "folderName": "mcmod.info",
+        "fimgerprint": 3610602848
+    }, {
+        "folderName": "META-INF",
+        "fimgerprint": 2464251221
+    }, {
+        "folderName": "README.txt",
+        "fimgerprint": 1828434573
+    }],
+    "packageFingerprint": 391303460,
+    "gameVersion": ["1.12.2"],
+    "installMetadata": null
+}
