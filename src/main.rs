@@ -195,7 +195,7 @@ impl Command for Search {
             if !mod_info.is_empty() {
                 for mod_info in mod_info {
                     println!(
-                        "Mod found, id is: {}, name is {}, main page is: {}",
+                        "Mod found, id is {} , name is {}, main page is: {}",
                         mod_info.id, mod_info.name, mod_info.website_url
                     );
                     if dict.iter().find(|info| mod_info.id == info.id).is_none() {
