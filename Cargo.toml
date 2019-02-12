@@ -10,3 +10,4 @@ serde = { version = "1.0.87", features = ["derive", "rc"] }
 serde_json = "1.0.38"
 serde_yaml = "0.8.8"
 reqwest = "0.9.9"
+colored = "1.7.0"

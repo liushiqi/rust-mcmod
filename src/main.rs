@@ -7,6 +7,7 @@ use std::{error::Error,
           path::{Path, PathBuf},
           sync::Arc};
 
+use colored::*;
 use reqwest::header::USER_AGENT;
 use rustyline::{config::Configurer, error::ReadlineError, At, Cmd, Editor, KeyPress, Movement};
 use serde::{Deserialize, Serialize};
@@ -18,7 +19,8 @@ fn main() {
     ))
     .unwrap_or_default();
     while let Err(err) = run(&mut reader, &mut dict) {
-        println!("{}", err);
+        let status = format!("Error: {}", err).red().bold();
+        println!("\r\x1b[0K{}", status);
         save(&mut dict).unwrap();
         reader.save_history("history.line").unwrap();
     }
@@ -62,7 +64,8 @@ fn run(reader: &mut Editor<()>, dict: &mut Vec<ModInfo>) -> Result<(), Box<Error
                 break Ok(());
             },
             Err(err) => {
-                println!("Error found: {:?}", err);
+                let status = format!("Error: {}", err).red().bold();
+                println!("\r\x1b[0K{}", status);
                 Err(err)?
             },
         }
@@ -166,7 +169,7 @@ impl Command for Commands {
                 },
             };
         }
-        println!("Invalid Command: {}", line.join(" "));
+        println!("{} {}", "Invalid Command:".red(), line.join(" ").red().italic());
         Ok(Status::CONTINUE)
     }
 }
@@ -196,7 +199,9 @@ impl Command for Search {
                 for mod_info in mod_info {
                     println!(
                         "Mod found, id is {} , name is {}, main page is: {}",
-                        mod_info.id, mod_info.name, mod_info.website_url
+                        mod_info.id.to_string().green(),
+                        mod_info.name.blue(),
+                        mod_info.website_url.purple().underline()
                     );
                     if dict.iter().find(|info| mod_info.id == info.id).is_none() {
                         dict.push(mod_info);
@@ -204,7 +209,7 @@ impl Command for Search {
                 }
                 dict.sort_by_key(|mod_info| mod_info.id);
             } else {
-                println!("No mod found.");
+                println!("{}", "No mod found.".red());
             }
             Ok(Status::CONTINUE)
         } else {
@@ -249,11 +254,11 @@ impl Command for Download {
                             dict.sort_by_key(|mod_info| mod_info.id);
                             download_mod_to_dir(&path, id, dict, &version)?;
                         } else {
-                            println!("Mod with id {} not found.", id);
+                            println!("{} {} {}", "Mod with id".red(), id.to_string().green(), "not found".red());
                         }
                     }
                 } else {
-                    println!("not valid input: {}", id);
+                    println!("{} {}", "not valid input:".red(), id.red().bold());
                 }
             }
             Ok(Status::CONTINUE)
@@ -286,11 +291,11 @@ impl Command for Print {
                             dict.push(mod_info);
                             dict.sort_by_key(|mod_info| mod_info.id);
                         } else {
-                            println!("Mod with id {} not found.", id);
+                            println!("{} {} {}", "Mod with id".red(), id.to_string().red().bold(), "not found".red());
                         }
                     }
                 } else {
-                    println!("not valid input: {}", id);
+                    println!("{} {}", "not valid input:".red(), id.red());
                 }
             }
             Ok(Status::CONTINUE)
@@ -380,7 +385,8 @@ fn download_mod_to_dir(dir: &PathBuf, id: u32, dict: &mut Vec<ModInfo>, version:
                         download(&file_info.download_url, &dir.join(file_info.file_name_on_disk.clone()))?;
                         println!(
                             "\r\x1b[0KDownload {} from {} succeed!",
-                            file_info.file_name_on_disk, file_info.download_url
+                            file_info.file_name_on_disk,
+                            file_info.download_url.purple().underline()
                         );
                         downloaded.push(id);
                         for dep in file_info.dependencies.iter() {
@@ -389,7 +395,10 @@ fn download_mod_to_dir(dir: &PathBuf, id: u32, dict: &mut Vec<ModInfo>, version:
                             }
                         }
                     } else {
-                        println!("No mod {} for Minecraft version {}.", mod_info.name, version);
+                        let message =
+                            format!("No mod {} for Minecraft version {}.", mod_info.name.bold(), version.italic())
+                                .red();
+                        println!("{}", message);
                     }
                 } else {
                     let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()?;
