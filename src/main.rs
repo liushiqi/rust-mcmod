@@ -8,7 +8,7 @@ use std::{error::Error,
           sync::Arc};
 
 use colored::Colorize;
-use reqwest::header::USER_AGENT;
+use reqwest::{header, Client};
 use rustyline::{config::Configurer, error::ReadlineError, At, Cmd, Editor, KeyPress, Movement};
 use serde::{Deserialize, Serialize};
 
@@ -18,7 +18,10 @@ fn main() {
         OpenOptions::new().read(true).create(true).write(true).open("./mods.yaml").unwrap(),
     ))
     .unwrap_or_default();
-    while let Err(err) = run(&mut reader, &mut dict) {
+    let mut headers = header::HeaderMap::new();
+    headers.insert(header::USER_AGENT, header::HeaderValue::from_static("liushiqi17@mails.ucas.ac.cn"));
+    let client = reqwest::Client::builder().use_rustls_tls().default_headers(headers).build().unwrap();
+    while let Err(err) = run(&mut reader, &mut dict, &client) {
         let status = format!("Error: {}", err).red().bold();
         println!("\r\x1b[0K{}", status);
         save(&mut dict).unwrap();
@@ -26,7 +29,7 @@ fn main() {
     }
 }
 
-fn run(reader: &mut Editor<()>, dict: &mut Vec<ModInfo>) -> Result<(), Box<Error>> {
+fn run(reader: &mut Editor<()>, dict: &mut Vec<ModInfo>, client: &Client) -> Result<(), Box<Error>> {
     dict.sort_by_key(|mod_info| mod_info.id);
     if reader.load_history("history.line").is_err() {
         println!("No previous history.");
@@ -47,8 +50,12 @@ fn run(reader: &mut Editor<()>, dict: &mut Vec<ModInfo>) -> Result<(), Box<Error
         match line {
             Ok(line) => {
                 if !line.is_empty() {
-                    let status =
-                        invoker.invoke(line.split_whitespace().map(|s| s.to_string()).collect(), dict, reader)?;
+                    let status = invoker.invoke(
+                        line.split_whitespace().map(|s| s.to_string()).collect(),
+                        dict,
+                        reader,
+                        client,
+                    )?;
                     reader.save_history("history.line").unwrap();
                     if status == Status::QUIT {
                         save(dict)?;
@@ -154,10 +161,10 @@ impl Commands {
 
 impl Command for Commands {
     fn invoke(
-        &self, line: Vec<String>, dict: &mut Vec<ModInfo>, editor: &mut Editor<()>,
+        &self, line: Vec<String>, dict: &mut Vec<ModInfo>, editor: &mut Editor<()>, client: &Client,
     ) -> Result<Status, Box<Error>> {
         for command in self.commands.clone() {
-            let result = command.invoke(line.clone(), dict, editor);
+            let result = command.invoke(line.clone(), dict, editor, client);
             match result {
                 Ok(status) => return Ok(status),
                 Err(err) => {
@@ -175,24 +182,23 @@ impl Command for Commands {
 }
 
 trait Command {
-    fn invoke(&self, line: Vec<String>, dict: &mut Vec<ModInfo>, editor: &mut Editor<()>)
-        -> Result<Status, Box<Error>>;
+    fn invoke(
+        &self, line: Vec<String>, dict: &mut Vec<ModInfo>, editor: &mut Editor<()>, client: &Client,
+    ) -> Result<Status, Box<Error>>;
 }
 
 struct Search;
 
 impl Command for Search {
     fn invoke(
-        &self, line: Vec<String>, dict: &mut Vec<ModInfo>, _editor: &mut Editor<()>,
+        &self, line: Vec<String>, dict: &mut Vec<ModInfo>, _editor: &mut Editor<()>, client: &Client,
     ) -> Result<Status, Box<Error>> {
         if line.len() > 1 && &line[0] == "search" {
-            let client = reqwest::Client::builder().use_rustls_tls().build()?;
             let mod_info: Vec<ModInfo> = client
                 .get(&format!(
                     "https://staging_cursemeta.dries007.net/api/v3/direct/addon/search?gameId=432&sectionId=6&searchFilter={}",
                     line[1..].join("%20")
                 ))
-                .header(USER_AGENT, "liushiqi17@mails.ucas.ac.cn")
                 .send()?
                 .json()?;
             if !mod_info.is_empty() {
@@ -222,7 +228,7 @@ struct Download;
 
 impl Command for Download {
     fn invoke(
-        &self, line: Vec<String>, dict: &mut Vec<ModInfo>, editor: &mut Editor<()>,
+        &self, line: Vec<String>, dict: &mut Vec<ModInfo>, editor: &mut Editor<()>, client: &Client,
     ) -> Result<Status, Box<Error>> {
         if line.len() > 1 && &line[0] == "download" {
             editor.set_auto_add_history(false);
@@ -239,23 +245,19 @@ impl Command for Download {
                     if let Some(mod_info) = dict.iter().find(|mod_info| mod_info.id == id) {
                         let dir = format!("./mods/{}/{}", version, mod_info.name);
                         let path = Path::new(&dir).to_path_buf();
-                        download_mod_to_dir(&path, id, dict, &version)?;
+                        download_mod_to_dir(&path, id, dict, &version, client)?;
+                    } else if let Ok(mod_info) = client
+                        .get(&format!("https://staging_cursemeta.dries007.net/api/v3/direct/addon/{}", id))
+                        .send()?
+                        .json::<ModInfo>()
+                    {
+                        let dir = format!("./mods/{}/{}", version, mod_info.name);
+                        let path = Path::new(&dir).to_path_buf();
+                        dict.push(mod_info);
+                        dict.sort_by_key(|mod_info| mod_info.id);
+                        download_mod_to_dir(&path, id, dict, &version, client)?;
                     } else {
-                        let client = reqwest::Client::builder().use_rustls_tls().build()?;
-                        if let Ok(mod_info) = client
-                            .get(&format!("https://staging_cursemeta.dries007.net/api/v3/direct/addon/{}", id))
-                            .header(USER_AGENT, "liushiqi17@mails.ucas.ac.cn")
-                            .send()?
-                            .json::<ModInfo>()
-                        {
-                            let dir = format!("./mods/{}/{}", version, mod_info.name);
-                            let path = Path::new(&dir).to_path_buf();
-                            dict.push(mod_info);
-                            dict.sort_by_key(|mod_info| mod_info.id);
-                            download_mod_to_dir(&path, id, dict, &version)?;
-                        } else {
-                            println!("{} {} {}", "Mod with id".red(), id.to_string().green(), "not found".red());
-                        }
+                        println!("{} {} {}", "Mod with id".red(), id.to_string().green(), "not found".red());
                     }
                 } else {
                     println!("{} {}", "not valid input:".red(), id.red().bold());
@@ -272,27 +274,23 @@ struct Print;
 
 impl Command for Print {
     fn invoke(
-        &self, line: Vec<String>, dict: &mut Vec<ModInfo>, _editor: &mut Editor<()>,
+        &self, line: Vec<String>, dict: &mut Vec<ModInfo>, _editor: &mut Editor<()>, client: &Client,
     ) -> Result<Status, Box<Error>> {
         if line.len() > 1 && &line[0] == "print" {
             for id in &line[1..] {
                 if let Ok(id) = id.parse::<u32>() {
                     if let Some(mod_info) = dict.iter().find(|mod_info| mod_info.id == id) {
                         println!("{:#?}", mod_info);
+                    } else if let Ok(mod_info) = client
+                        .get(&format!("https://staging_cursemeta.dries007.net/api/v3/direct/addon/{}", id))
+                        .send()?
+                        .json::<ModInfo>()
+                    {
+                        println!("{:#?}", mod_info);
+                        dict.push(mod_info);
+                        dict.sort_by_key(|mod_info| mod_info.id);
                     } else {
-                        let client = reqwest::Client::builder().use_rustls_tls().build()?;
-                        if let Ok(mod_info) = client
-                            .get(&format!("https://staging_cursemeta.dries007.net/api/v3/direct/addon/{}", id))
-                            .header(USER_AGENT, "liushiqi17@mails.ucas.ac.cn")
-                            .send()?
-                            .json::<ModInfo>()
-                        {
-                            println!("{:#?}", mod_info);
-                            dict.push(mod_info);
-                            dict.sort_by_key(|mod_info| mod_info.id);
-                        } else {
-                            println!("{} {} {}", "Mod with id".red(), id.to_string().red().bold(), "not found".red());
-                        }
+                        println!("{} {} {}", "Mod with id".red(), id.to_string().red().bold(), "not found".red());
                     }
                 } else {
                     println!("{} {}", "not valid input:".red(), id.red());
@@ -309,7 +307,7 @@ struct Update;
 
 impl Command for Update {
     fn invoke(
-        &self, line: Vec<String>, dict: &mut Vec<ModInfo>, _editor: &mut Editor<()>,
+        &self, line: Vec<String>, dict: &mut Vec<ModInfo>, _editor: &mut Editor<()>, _client: &Client,
     ) -> Result<Status, Box<Error>> {
         if !line.is_empty() && (&line[0] == "update" || &line[0] == "clear") {
             dict.clear();
@@ -325,7 +323,7 @@ struct Save;
 
 impl Command for Save {
     fn invoke(
-        &self, line: Vec<String>, dict: &mut Vec<ModInfo>, editor: &mut Editor<()>,
+        &self, line: Vec<String>, dict: &mut Vec<ModInfo>, editor: &mut Editor<()>, _client: &Client,
     ) -> Result<Status, Box<Error>> {
         if !line.is_empty() && &line[0] == "save" {
             save(dict)?;
@@ -341,7 +339,7 @@ struct Quit;
 
 impl Command for Quit {
     fn invoke(
-        &self, line: Vec<String>, dict: &mut Vec<ModInfo>, editor: &mut Editor<()>,
+        &self, line: Vec<String>, dict: &mut Vec<ModInfo>, editor: &mut Editor<()>, _client: &Client,
     ) -> Result<Status, Box<Error>> {
         if !line.is_empty() && (&line[0] == "quit" || &line[0] == "exit") {
             save(dict)?;
@@ -360,7 +358,9 @@ fn save(dict: &mut Vec<ModInfo>) -> Result<(), Box<Error>> {
     Ok(())
 }
 
-fn download_mod_to_dir(dir: &PathBuf, id: u32, dict: &mut Vec<ModInfo>, version: &str) -> Result<(), Box<Error>> {
+fn download_mod_to_dir(
+    dir: &PathBuf, id: u32, dict: &mut Vec<ModInfo>, version: &str, client: &Client,
+) -> Result<(), Box<Error>> {
     let mut stack = vec![id];
     let mut downloaded = Vec::<u32>::default();
     loop {
@@ -371,18 +371,16 @@ fn download_mod_to_dir(dir: &PathBuf, id: u32, dict: &mut Vec<ModInfo>, version:
                         mod_info.game_version_latest_files.iter().find(|file_info| file_info.game_version == version);
                     if let Some(file_info) = file_info {
                         create_dir_all(dir)?;
-                        let client = reqwest::Client::builder().use_rustls_tls().build()?;
                         let file_info: FileInfo = client
                             .get(&format!(
                                 "https://staging_cursemeta.dries007.net/api/v3/direct/addon/{}/file/{}",
                                 id, file_info.project_file_id
                             ))
-                            .header(USER_AGENT, "liushiqi17@mails.ucas.ac.cn")
                             .send()?
                             .json()?;
                         print!("Downloading {}", file_info.file_name_on_disk.green());
                         stdout().flush()?;
-                        download(&file_info.download_url, &dir.join(file_info.file_name_on_disk.clone()))?;
+                        download(&file_info.download_url, &dir.join(file_info.file_name_on_disk.clone()), client)?;
                         println!(
                             "\r\x1b[0KDownload {} from {} succeed!",
                             file_info.file_name_on_disk.green(),
@@ -401,10 +399,8 @@ fn download_mod_to_dir(dir: &PathBuf, id: u32, dict: &mut Vec<ModInfo>, version:
                         println!("{}", message);
                     }
                 } else {
-                    let client = reqwest::Client::builder().use_rustls_tls().build()?;
                     let mod_info: ModInfo = client
                         .get(&format!("https://staging_cursemeta.dries007.net/api/v3/direct/addon/{}", id))
-                        .header(USER_AGENT, "liushiqi17@mails.ucas.ac.cn")
                         .send()?
                         .json()?;
                     stack.push(mod_info.id);
@@ -419,12 +415,11 @@ fn download_mod_to_dir(dir: &PathBuf, id: u32, dict: &mut Vec<ModInfo>, version:
     }
 }
 
-fn download(url: &str, write_to: &PathBuf) -> Result<(), Box<Error>> {
-    let client = reqwest::Client::builder().use_rustls_tls().timeout(None).build()?;
+fn download(url: &str, write_to: &PathBuf, client: &Client) -> Result<(), Box<Error>> {
     client
         .get(url)
         .header(
-            USER_AGENT,
+            header::USER_AGENT,
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.81 Safari/537.36",
         )
         .send()?
