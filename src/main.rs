@@ -186,7 +186,7 @@ impl Command for Search {
         &self, line: Vec<String>, dict: &mut Vec<ModInfo>, _editor: &mut Editor<()>,
     ) -> Result<Status, Box<Error>> {
         if line.len() > 1 && &line[0] == "search" {
-            let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()?;
+            let client = reqwest::Client::builder().use_rustls_tls().build()?;
             let mod_info: Vec<ModInfo> = client
                 .get(&format!(
                     "https://staging_cursemeta.dries007.net/api/v3/direct/addon/search?gameId=432&sectionId=6&searchFilter={}",
@@ -241,7 +241,7 @@ impl Command for Download {
                         let path = Path::new(&dir).to_path_buf();
                         download_mod_to_dir(&path, id, dict, &version)?;
                     } else {
-                        let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()?;
+                        let client = reqwest::Client::builder().use_rustls_tls().build()?;
                         if let Ok(mod_info) = client
                             .get(&format!("https://staging_cursemeta.dries007.net/api/v3/direct/addon/{}", id))
                             .header(USER_AGENT, "liushiqi17@mails.ucas.ac.cn")
@@ -280,7 +280,7 @@ impl Command for Print {
                     if let Some(mod_info) = dict.iter().find(|mod_info| mod_info.id == id) {
                         println!("{:#?}", mod_info);
                     } else {
-                        let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()?;
+                        let client = reqwest::Client::builder().use_rustls_tls().build()?;
                         if let Ok(mod_info) = client
                             .get(&format!("https://staging_cursemeta.dries007.net/api/v3/direct/addon/{}", id))
                             .header(USER_AGENT, "liushiqi17@mails.ucas.ac.cn")
@@ -371,7 +371,7 @@ fn download_mod_to_dir(dir: &PathBuf, id: u32, dict: &mut Vec<ModInfo>, version:
                         mod_info.game_version_latest_files.iter().find(|file_info| file_info.game_version == version);
                     if let Some(file_info) = file_info {
                         create_dir_all(dir)?;
-                        let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()?;
+                        let client = reqwest::Client::builder().use_rustls_tls().build()?;
                         let file_info: FileInfo = client
                             .get(&format!(
                                 "https://staging_cursemeta.dries007.net/api/v3/direct/addon/{}/file/{}",
@@ -401,7 +401,7 @@ fn download_mod_to_dir(dir: &PathBuf, id: u32, dict: &mut Vec<ModInfo>, version:
                         println!("{}", message);
                     }
                 } else {
-                    let client = reqwest::Client::builder().use_default_tls().build()?;
+                    let client = reqwest::Client::builder().use_rustls_tls().build()?;
                     let mod_info: ModInfo = client
                         .get(&format!("https://staging_cursemeta.dries007.net/api/v3/direct/addon/{}", id))
                         .header(USER_AGENT, "liushiqi17@mails.ucas.ac.cn")
@@ -420,7 +420,7 @@ fn download_mod_to_dir(dir: &PathBuf, id: u32, dict: &mut Vec<ModInfo>, version:
 }
 
 fn download(url: &str, write_to: &PathBuf) -> Result<(), Box<Error>> {
-    let client = reqwest::Client::builder().use_default_tls().timeout(None).build()?;
+    let client = reqwest::Client::builder().use_rustls_tls().timeout(None).build()?;
     client
         .get(url)
         .header(
