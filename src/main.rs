@@ -51,7 +51,7 @@ fn run(reader: &mut Editor<()>, dict: &mut Vec<ModInfo>, client: &Client) -> Res
             Ok(line) => {
                 if !line.is_empty() {
                     let status = invoker.invoke(
-                        line.split_whitespace().map(|s| s.to_string()).collect(),
+                        line.split_whitespace().map(std::string::ToString::to_string).collect(),
                         dict,
                         reader,
                         client,
