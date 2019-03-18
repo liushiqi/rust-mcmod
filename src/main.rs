@@ -3,11 +3,12 @@
 use std::{error::Error,
           fmt::{Display, Formatter},
           fs::{create_dir_all, OpenOptions},
-          io::{stdout, BufReader, Write},
+          io::{self, copy, BufReader, Read},
           path::{Path, PathBuf},
           sync::Arc};
 
 use colored::Colorize;
+use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::{header, Client};
 use rustyline::{config::Configurer, error::ReadlineError, At, Cmd, Editor, KeyPress, Movement};
 use serde::{Deserialize, Serialize};
@@ -96,6 +97,8 @@ struct FileInfo {
     dependencies: Vec<DependencyInfo>,
     #[serde(alias = "fileNameOnDisk")]
     file_name_on_disk: String,
+    #[serde(alias = "fileLength")]
+    file_length: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -378,9 +381,7 @@ fn download_mod_to_dir(
                             ))
                             .send()?
                             .json()?;
-                        print!("Downloading {}", file_info.file_name_on_disk.green());
-                        stdout().flush()?;
-                        download(&file_info.download_url, &dir.join(file_info.file_name_on_disk.clone()), client)?;
+                        download(&file_info, &dir.join(file_info.file_name_on_disk.clone()), client)?;
                         println!(
                             "\r\x1b[0KDownload {} from {} succeed!",
                             file_info.file_name_on_disk.green(),
@@ -415,14 +416,33 @@ fn download_mod_to_dir(
     }
 }
 
-fn download(url: &str, write_to: &PathBuf, client: &Client) -> Result<(), Box<Error>> {
-    client
-        .get(url)
-        .header(
-            header::USER_AGENT,
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.81 Safari/537.36",
-        )
-        .send()?
-        .copy_to(&mut OpenOptions::new().write(true).create(true).append(false).open(write_to)?)?;
+struct DownloadProgress<R> {
+    inner: R,
+    progress_bar: ProgressBar,
+}
+
+impl<R: Read> Read for DownloadProgress<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.inner.read(buf).map(|n| {
+            self.progress_bar.inc(n as u64);
+            n
+        })
+    }
+}
+
+fn download(file_info: &FileInfo, write_to: &PathBuf, client: &Client) -> Result<(), Box<Error>> {
+    let request = client.get(&file_info.download_url).header(
+        header::USER_AGENT,
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.81 Safari/537.36",
+    );
+    let pb = ProgressBar::new(file_info.file_length);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+            .progress_chars("#>-"),
+    );
+    let mut source = DownloadProgress { progress_bar: pb, inner: request.send()? };
+    let mut target = OpenOptions::new().write(true).create(true).append(false).open(write_to)?;
+    copy(&mut source, &mut target)?;
     Ok(())
 }

@@ -6,8 +6,9 @@ edition = "2018"
 
 [dependencies]
 rustyline = "3.0.0"
-serde = { version = "1.0.87", features = ["derive", "rc"] }
-serde_json = "1.0.38"
+serde = { version = "1.0.89", features = ["derive", "rc"] }
+serde_json = "1.0.39"
 serde_yaml = "0.8.8"
-reqwest = { version = "0.9.9", features = ["rustls-tls"] }
+reqwest = { version = "0.9.11", features = ["rustls-tls"] }
 colored = "1.7.0"
+indicatif = "0.11.0"
